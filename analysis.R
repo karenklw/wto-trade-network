@@ -227,8 +227,32 @@ for (cluster_id in cluster_ids) {
   dev.off()
 }
 
+# TODO: clustering for 2011
+
 
 # TODO: statistics of trade network across years (num edges, num nodes, density, cluster coefficient)
+stats <- data.frame(
+  year = 2011:2022,
+  num_nodes = integer(length(years)),
+  num_edges = integer(length(years)),
+  density = numeric(length(years)),
+  cluster_coef = numeric(length(years))
+)
 
+for (year in years) {
+  net <- filtered_data %>% filter(Year == year)
+  netgraph <- graph_from_data_frame(net, directed = TRUE)
+  stats[stats$year == year, "num_nodes"] <- vcount(netgraph)
+  stats[stats$year == year, "num_edges"] <- ecount(netgraph)
+  stats[stats$year == year, "density"] <- round(edge_density(netgraph), 3)
+  stats[stats$year == year, "cluster_coef"] <- round(transitivity(netgraph, type = "global"), 3)
+}
+stats_table <- tableGrob(stats, rows = NULL)
+stats_title <- textGrob("Summary of Arms Trade Network from 2011-2022", gp = gpar(fontsize = 14, fontface = "bold"))
+stats_table_with_title <- gtable_add_rows(stats_table, heights = unit(1.5, "lines"), pos = 0)
+stats_table_with_title <- gtable_add_grob(stats_table_with_title, stats_title, t = 1, l = 1, r = ncol(stats_table_with_title))
 
-
+stats_filename <- "wto-trade-network/results/stats.png"
+png(stats_filename, width = 800, height = 600)
+grid.draw(stats_table_with_title)
+dev.off()
