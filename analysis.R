@@ -8,6 +8,8 @@ library(tidyverse)
 library(gridExtra)
 library(grid)
 library(gtable)
+library(btergm)
+library(intergraph)
 
 data <- read.csv("wto-trade-network/WtoData_20250209133853.csv")
 head(data)
@@ -52,7 +54,9 @@ print(unique_unit_codes) # filtered reports are in USD, not USM (million USD)
 unique_units <- unique(filtered_data$Unit)
 print(unique_units)  # filtered reports are in 'US$', not 'Million US dollar'
 
-# filtered_data$ScaledEdgeWidth <- log10(filtered_data$Value + 1)
+unique_period <- unique(filtered_data$Period)
+print(unique_period)
+
 # normalize to be between 1 and 10 for readability of plot
 filtered_data$ScaledEdgeWidth <- (filtered_data$Value - min(filtered_data$Value)) / 
                                  (max(filtered_data$Value) - min(filtered_data$Value)) * 9 + 1
@@ -200,9 +204,6 @@ partner_names <- yearly_data_2022 %>%
 country_names <- bind_rows(reporting_names, partner_names) %>% distinct()
 membership_df <- left_join(membership_df, country_names, by = "ISO3A_Code")
 membership_df <- unique(membership_df)
-cluster_colors <- c("#00bfff", "#ffc800", "#00bf00")
-V(yearly_trade_2022)$color <- cluster_colors[membership(clusters_2022)]
-membership_df$Color <- V(yearly_trade_2022)$color[match(membership_df$ISO3A_Code, V(yearly_trade_2022)$name)]
 cluster_ids <- unique(membership_df$Cluster)
 
 for (cluster_id in cluster_ids) {
@@ -213,10 +214,7 @@ for (cluster_id in cluster_ids) {
 
   table_grob <- tableGrob(cluster_table, rows = NULL)
 
-  # get corresponding cluster color from the vertex assignment
-  cluster_color <- unique(membership_df$Color[membership_df$Cluster == cluster_id])
-
-  title <- textGrob(paste("Cluster", cluster_id, "Countries (2022)"), gp = gpar(fontsize = 14, fontface = "bold", col = cluster_color))
+  title <- textGrob(paste("Cluster", cluster_id, "Countries (2022)"), gp = gpar(fontsize = 14, fontface = "bold"))
 
   table_with_title <- gtable_add_rows(table_grob, heights = unit(1.5, "lines"), pos = 0)
   table_with_title <- gtable_add_grob(table_with_title, title, t = 1, l = 1, r = ncol(table_with_title))
@@ -227,8 +225,69 @@ for (cluster_id in cluster_ids) {
   dev.off()
 }
 
-# TODO: clustering for 2011
+# clustering for 2011
+yearly_data_2011 <- filtered_data %>% filter(Year == 2011)
+yearly_trade_2011 <- graph_from_data_frame(yearly_data_2011, directed = TRUE)
+  
+V(yearly_trade_2011)$name <- unique(c(yearly_data_2011$Reporting.Economy.ISO3A.Code, yearly_data_2011$Partner.Economy.ISO3A.Code))
+V(yearly_trade_2011)$label <- unique(c(yearly_data_2011$Reporting.Economy.ISO3A.Code, yearly_data_2011$Partner.Economy.ISO3A.Code))
+V(yearly_trade_2011)$size <- 5
+E(yearly_trade_2011)$weight <- yearly_data_2011$Value
+E(yearly_trade_2011)$Frequency <- yearly_data_2011$Frequency
+E(yearly_trade_2011)$color <- "gray"
 
+clusters_2011 <- cluster_leading_eigen(yearly_trade_2011, weights = E(yearly_trade_2011)$Value)
+V(yearly_trade_2011)$color <- membership(clusters_2011)
+
+cluster_2011_filename <- "wto-trade-network/clustering/clusters_2011.png"
+png(cluster_2011_filename, width = 800, height = 600)
+plot(yearly_trade_2011, 
+  edge.width = 1,
+  edge.arrow.size = 0.2,
+  edge.color = E(yearly_trade_2011)$color,
+  vertex.size = 3, 
+  vertex.label = NA, 
+  main = paste("Clusters in WTO Arms Trade Network for 2011")
+)
+dev.off()
+
+# tables of 2011 clusters
+membership_df <- data.frame(
+  ISO3A_Code = V(yearly_trade_2011)$name,
+  Cluster = membership(clusters_2011)
+)
+
+reporting_names <- yearly_data_2011 %>%
+  select(ISO3A_Code = Reporting.Economy.ISO3A.Code, Country_Name = Reporting.Economy) %>%
+  distinct()
+
+partner_names <- yearly_data_2011 %>%
+  select(ISO3A_Code = Partner.Economy.ISO3A.Code, Country_Name = Partner.Economy) %>%
+  distinct()
+
+country_names <- bind_rows(reporting_names, partner_names) %>% distinct()
+membership_df <- left_join(membership_df, country_names, by = "ISO3A_Code")
+membership_df <- unique(membership_df)
+cluster_ids <- unique(membership_df$Cluster)
+
+for (cluster_id in cluster_ids) {
+  cluster_table <- membership_df %>%
+    filter(Cluster == cluster_id) %>%
+    select(ISO3A_Code, Country_Name) %>%
+    arrange(Country_Name)
+
+  table_grob <- tableGrob(cluster_table, rows = NULL)
+
+  title <- textGrob(paste("Cluster", cluster_id, "Countries (2011)"), gp = gpar(fontsize = 14, fontface = "bold"))
+
+  table_with_title <- gtable_add_rows(table_grob, heights = unit(1.5, "lines"), pos = 0)
+  table_with_title <- gtable_add_grob(table_with_title, title, t = 1, l = 1, r = ncol(table_with_title))
+
+  table_filename <- paste0("wto-trade-network/clustering/cluster_", cluster_id, "_2011.png")
+  png(table_filename, width = 500, height = 1500)
+  grid.draw(table_with_title)
+  dev.off()
+}
 
 # statistics of trade network across years (num edges, num nodes, density, cluster coefficient)
 stats <- data.frame(
@@ -277,3 +336,87 @@ ggplot(stats_long, aes(x = year, y = value, color = metric)) +
 
 plot_filename <- "wto-trade-network/results/density_transitivity_plot.png"
 ggsave(plot_filename, width = 10, height = 6)
+
+# temporal ERGM models
+
+network_list <- list()
+
+for (year in years) {
+  yearly_data <- filtered_data %>%
+    filter(Year == year) %>%
+    group_by(Reporting.Economy.ISO3A.Code, Partner.Economy.ISO3A.Code) %>%
+    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")  # sum trade values because trade data has duplicate edges
+  
+  yearly_network <- network(yearly_data[, c("Reporting.Economy.ISO3A.Code", "Partner.Economy.ISO3A.Code")],
+                            directed = TRUE, matrix.type = "edgelist")
+  
+  set.edge.attribute(yearly_network, "weight", yearly_data$Value)
+  
+  network_list[[as.character(year)]] <- yearly_network
+}
+
+# without covariates
+model <- btergm(network_list ~ edges + mutual,
+                R = 500)  # 500 MCMC simulations (bootstrap replications)
+summary(model)
+
+
+# importing World Bank data to add as covariates
+wdi <- read.csv("wto-trade-network/worldbank/WDI.csv")
+wdi_filtered <- wdi %>% filter(Country.Code %in% members)
+valid_members <- unique(wdi_filtered$Country.Code)
+length(valid_members)
+
+# set GDP as vertex attribute directly
+gdp_data <- wdi_filtered %>% filter(Series.Code == "NY.GDP.MKTP.CD")
+
+for (year in names(network_list)) {
+  yearly_network <- network_list[[year]]
+  nodes <- network.vertex.names(yearly_network)
+
+  gdp_values <- gdp_data %>%
+    select(Country.Code, !!paste0("X", year, "..YR", year, ".")) %>%
+    rename(GDP = !!paste0("X", year, "..YR", year, "."))
+
+  gdp_vector <- setNames(as.numeric(gdp_values$GDP), gdp_values$Country.Code)
+
+  gdp_for_network <- setNames(rep(0, length(nodes)), nodes)
+  matching_nodes <- intersect(names(gdp_vector), nodes)
+  gdp_for_network[matching_nodes] <- gdp_vector[matching_nodes]
+
+  gdp_for_network[is.na(gdp_for_network)] <- 0 # hard-coded some GDPs to 0 due to missing data
+
+  yearly_network <- set.vertex.attribute(yearly_network, "gdp", value = gdp_for_network)
+
+  network_list[[year]] <- yearly_network
+}
+for (year in names(network_list)) {
+  cat("Year:", year, "\n")
+  print(sum(is.na(get.vertex.attribute(network_list[[year]], "gdp"))))  # Should be 0
+}
+
+# model with GDP as node covariate
+model_gdp <- btergm(network_list ~ edges + mutual + nodecov("gdp"), R = 500)
+summary(model_gdp)
+
+# try log values of GDP
+for (year in names(network_list)) {
+    yearly_network <- network_list[[year]]
+    gdp_values <- get.vertex.attribute(yearly_network, "gdp")
+    set.vertex.attribute(yearly_network, "gdp_log", log1p(gdp_values))
+    network_list[[year]] <- yearly_network
+}
+model_gdp_log <- btergm(network_list ~ edges + mutual + nodecov("gdp") + nodecov("gdp_log"), R = 500)
+summary(model_gdp_log)
+
+# model with GDP differences as node covariate
+model_gdp_diff <- btergm(network_list ~ edges + mutual + nodecov("gdp") + nodecov("gdp_log") + absdiff("gdp") + absdiff("gdp_log"), R = 500)
+summary(model_gdp_diff)
+
+# include effects of forming mutual allies
+model_gwesp <- btergm(network_list ~ edges + nodecov("gdp_log") + gwesp(0.5, fixed = TRUE), R = 500)
+summary(model_gwesp)
+
+# include temporal effects
+model_gwesp_temporal <- btergm(network_list ~ edges + nodecov("gdp_log") + gwesp(0.5, fixed = TRUE) + timecov(), R = 500)
+summary(model_gwesp_temporal)
