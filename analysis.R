@@ -200,7 +200,7 @@ partner_names <- yearly_data_2022 %>%
 country_names <- bind_rows(reporting_names, partner_names) %>% distinct()
 membership_df <- left_join(membership_df, country_names, by = "ISO3A_Code")
 membership_df <- unique(membership_df)
-cluster_colors <- c("#00bfff", "#ffc800", "#00bf00")  # Ensure colors match the plot
+cluster_colors <- c("#00bfff", "#ffc800", "#00bf00")
 V(yearly_trade_2022)$color <- cluster_colors[membership(clusters_2022)]
 membership_df$Color <- V(yearly_trade_2022)$color[match(membership_df$ISO3A_Code, V(yearly_trade_2022)$name)]
 cluster_ids <- unique(membership_df$Cluster)
@@ -230,7 +230,7 @@ for (cluster_id in cluster_ids) {
 # TODO: clustering for 2011
 
 
-# TODO: statistics of trade network across years (num edges, num nodes, density, cluster coefficient)
+# statistics of trade network across years (num edges, num nodes, density, cluster coefficient)
 stats <- data.frame(
   year = 2011:2022,
   num_nodes = integer(length(years)),
@@ -256,3 +256,24 @@ stats_filename <- "wto-trade-network/results/stats.png"
 png(stats_filename, width = 800, height = 600)
 grid.draw(stats_table_with_title)
 dev.off()
+
+# scatterplot to show changes in density and transitivity
+stats_long <- stats %>%
+  pivot_longer(cols = c(density, cluster_coef), names_to = "metric", values_to = "value")
+
+ggplot(stats_long, aes(x = year, y = value, color = metric)) +
+  geom_point(size = 3) +
+  geom_line() +
+  scale_x_continuous(breaks = stats$year) +
+  labs(title = "Density and Transitivity by Year",
+       x = "Year",
+       y = "Value",
+       color = "Metric") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", color = "white"),
+        plot.background = element_rect(fill = "white", color = "white"),
+        legend.background = element_rect(fill = "white", color = "white"),
+        legend.key = element_rect(fill = "white", color = "white"))
+
+plot_filename <- "wto-trade-network/results/density_transitivity_plot.png"
+ggsave(plot_filename, width = 10, height = 6)
