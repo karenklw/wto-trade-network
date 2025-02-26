@@ -1,0 +1,221 @@
+---
+title: "POLSCI 309 Final Report: Analysis of the International Arms Trade Network from 2011-2022"
+author: "Karen Wang"
+date: "2025-02-28"
+output: html_document
+bibliography: refs.bib
+csl: acm-sig-proceedings.csl
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The global arms trade is a controversial topic that is extremely relevant to the fields of policy, politics, and economics. However, there has been a lack of empirical research on the political economics of arms trade [@akerman]. To address this gap, Akerman and Seim conducted a study that characterized bilateral arms trade as a network, which revealed differences between political pacts such as NATO and the Warsaw Pact and demonstrated how network analysis of arms trade relationships be useful in policymaking. We use network theory to similarly characterize global trade in arms and ammunition using more recent data from the years 2011 to 2022, with the aim of investigating features of the network and possible political and policy implications.
+
+# Data Analysis
+## Methodology Overview
+
+We draw inspiration from a previous network analysis on the international coffee trade network for summary statistics of the trade dataset [@sujaritpong]. Network density, transitivity, and clustering are investigated to draw conclusions on broad patterns among the countries involved in arms trade. Any subnetworks of countries—i.e., due to geographical proximity or existing trade agreements—can be revealed by examining clustering coefficients. It is hypothesized that some countries will control a large proportion of the total imports, and a country’s strength in this network can be measured by the sum of its edge weights. We also look at other features of the network after running temporal ERGM models with various covariates.
+
+## Data Preprocessing
+
+A dataset of all bilateral imports from reporting countries in the World Trade Organization [@wto] is used in this analysis. Using the WTO’s publicly available statistics portal, I filtered the data by the Harmonized System product code “93 – Arms and ammunition; parts and accessories thereof” for the years 2011 to 2024. The raw dataset contains the value of imports of this product category in US dollars for each reporting entity, so entities can be represented as nodes and their bilateral trade relationship can be represented as the edge. Edges can be weighted by the dollar value of imports. This dataset can therefore be represented as a directed graph. 
+
+"Reporting Economies" refer to the exporting entities; "Partner Economies" refer to the importing entities. We make a distinction here between "entities" and "countries" as the dataset includes aggregated reports from political entities, for example from the European Union. Therefore we filter the raw dataset to exclude all such political blocs, ending up with 200 members in the network. Data from 2023 and 2024 contained some null values so they were excluded to ensure there was complete data for each year. After constructing the `trade` graph, we have 183 nodes. An attribute `ScaledEdgeWidth` was added to represent the edge weights, which are the USD values of trades scaled to be a score between 1 and 10 for readability of network visualizations.
+
+```{r, warning=F, message=F}
+# imports
+library(igraph)
+library(ggplot2)
+library(dplyr)
+library(ggraph)
+library(tidyverse)
+library(tidygraph)
+library(gridExtra)
+library(btergm)
+library(intergraph)
+library(network)
+
+# ensure working directory is [path]/wto-trade-network
+setwd(file.path(getwd(), "wto-trade-network"))
+
+load("trade.rda")
+filtered_data <- read.csv("filtered_data.csv")
+stats <- read.csv("stats.csv")
+# str(trade)
+```
+
+## Inspecting the Data
+
+![Figure 1](stats.png)
+
+```{r, warning=F, message=F}
+# statistics of trade network across years (num edges, num nodes, density, cluster coefficient)
+stats_long <- stats %>%
+  pivot_longer(cols = c(density, cluster_coef), names_to = "metric", values_to = "value")
+ggplot(stats_long, aes(x = year, y = value, color = metric)) +
+  geom_point(size = 3) +
+  geom_line() +
+  scale_x_continuous(breaks = stats$year) +
+  labs(title = "Density and Transitivity by Year",
+       x = "Year",
+       y = "Value",
+       color = "Metric") +
+  theme_minimal()
+```
+
+TODO: description of statistics and trends
+
+## Community Detection
+### Clusters for 2011
+```{r, warning=F, message=F}
+load("yearly_trade_2011.rda")
+clusters_2011 <- cluster_leading_eigen(yearly_trade_2011, weights = E(yearly_trade_2011)$Value)
+V(yearly_trade_2011)$color <- membership(clusters_2011)
+
+plot(yearly_trade_2011,
+    edge.width = 1, # display unweighted edge widths for visual clarity (cluster weights were set above)
+    edge.arrow.size = 0.2,
+    edge.color = "gray",
+    vertex.size = V(yearly_trade_2011)$size,
+    vertex.label = NA,
+    main = paste("Clusters in WTO Arms Trade Network for 2011")
+)
+
+```
+
+### Clusters for 2022
+```{r, warning=F, message=F}
+load("yearly_trade_2022.rda")
+clusters_2022 <- cluster_leading_eigen(yearly_trade_2022, weights = E(yearly_trade_2022)$Value)
+V(yearly_trade_2022)$color <- membership(clusters_2022)
+
+plot(yearly_trade_2022,
+    edge.width = 1, # display unweighted edge widths for visual clarity (cluster weights were set above)
+    edge.arrow.size = 0.2,
+    edge.color = "gray",
+    vertex.size = V(yearly_trade_2022)$size,
+    vertex.label = NA,
+    main = paste("Clusters in WTO Arms Trade Network for 2022")
+)
+```
+
+### Comparing Clusters for 2011 and 2022
+```{r, warning=F, message=F}
+membership_2011 <- data.frame(
+  ISO3A_Code = V(yearly_trade_2011)$name,
+  Cluster = membership(clusters_2011)
+)
+membership_2022 <- data.frame(
+    ISO3A_Code = V(yearly_trade_2022)$name,
+    Cluster = membership(clusters_2022)
+)
+
+reporting_names <- filtered_data %>%
+  select(ISO3A_Code = Reporting.Economy.ISO3A.Code, Country_Name = Reporting.Economy) %>% 
+  distinct()
+
+partner_names <- filtered_data %>%
+  select(ISO3A_Code = Partner.Economy.ISO3A.Code, Country_Name = Partner.Economy) %>% 
+  distinct()
+
+country_names <- bind_rows(reporting_names, partner_names) %>% distinct()
+membership_2011 <- left_join(membership_2011, country_names, by = "ISO3A_Code")
+membership_2022 <- left_join(membership_2022, country_names, by = "ISO3A_Code")
+
+cat("Number of clusters detected in 2011:", length(unique(membership_2011$Cluster)), "\n")
+cat("Number of clusters detected in 2022:", length(unique(membership_2022$Cluster)), "\n")
+
+# count of members per cluster and show first 5 members; see Appendix A for full lists
+membership_2011 %>% group_by(Cluster) %>% summarise(n = n(), Countries = paste(head(Country_Name, 5), collapse = "; ")) 
+membership_2022 %>% group_by(Cluster) %>% summarise(n = n(), Countries = paste(head(Country_Name, 5), collapse = "; "))
+```
+
+TODO: descriptions from slides 6-8
+
+## Subgraphs of Top Importers and Exporters
+TODO: defining "importance"
+
+Subgraphs for 2011 and 2022 are shown below—see Appendix B for subgraphs and list of top countries for all years.
+
+![Figure 5](appendixB/top_trade_network_2011.png)
+
+![Figure 6](appendixB/top_trade_network_2022.png)
+
+TODO: description from slide 9
+
+## Temporal ERGM models
+TODO: basic intro on ERGM
+
+
+### Baseline Model (without covariates)
+```{r, warning=F, message=F}
+# load network list for temporal ERGM models
+load("network_list.rda")
+
+# baseline model (without covariates)
+model <- btergm(network_list ~ edges + mutual, R = 500)
+summary(model)
+```
+
+### Model with GDP as a Nodal Covariate
+```{r, warning=F, message=F}
+# "gdp" vertex attribute was set in `analysis.rmd`
+load("model_gdp.rda") # premade model
+# model_gdp <- btergm(network_list ~ edges + mutual + nodecov("gdp"), R = 500)
+summary(model_gdp)
+```
+
+### Adding log(GDP) nodal covariate
+```{r, warning=F, message=F}
+load("model_gdp_log.rda") # premade model
+# "gdp_log" vertex attribute was set in `analysis.rmd`
+# model_gdp_log <- btergm(network_list ~ edges + mutual + nodecov("gdp_log"), R = 500)
+summary(model_gdp_log)
+```
+
+### Adding log(GDP) differences nodal covariate
+```{r, warning=F, message=F}
+load("model_gdp_diff.rda") # premade model
+# model_gdp_diff <- btergm(network_list ~ edges + mutual + nodecov("gdp_log") + absdiff("gdp_log"), R = 500)
+summary(model_gdp_diff)
+```
+
+### Adding gwesp() term
+```{r, warning=F, message=F}
+load("model_gwesp.rda") # premade model (this one takes several mins to run otherwise)
+# model_gwesp <- btergm(network_list ~ edges + mutual + nodecov("gdp_log") + absdiff("gdp_log") + gwesp(0.5, fixed = TRUE), R = 500)
+summary(model_gwesp)
+```
+
+### Adding timecov() term
+```{r, warning=F, message=F}
+load("model_gwesp_temporal.rda") # premade model (takes >10 mins to run, even with parallelization)
+# model_gwesp_temporal <- btergm(network_list ~ edges + mutual + nodecov("gdp_log") + gwesp(0.5, fixed = TRUE) + timecov(), R = 500, parallel = "multicore")
+summary(model_gwesp_temporal)
+```
+
+# Conclusion
+TODO: slide 16 here
+
+## Limitations
+
+
+
+
+# References
+::: [@akerman]
+::: [@sujaritpong]
+::: [@wto]
+::: [@wb]
+
+# Appendix A: Clustering Visualizations
+link to folder instead of inserting images
+
+# Appendix B: Subgraphs of Top Importers and Exporters
+link to folder instead of inserting images
+
+# Appendix C: Lists of Top Importers and Exporters
+link to folder instead of inserting images

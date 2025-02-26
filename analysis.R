@@ -75,12 +75,14 @@ filtered_data <- filtered_data %>% filter(Reporting.Economy.ISO3A.Code != Partne
 
 # remove data from years 2023 and 2024
 filtered_data <- filtered_data %>% filter(Year != 2023 & Year != 2024)
+# write.csv(filtered_data, "filtered_data.csv", row.names = FALSE)
 
 trade <- graph_from_data_frame(filtered_data, directed = TRUE)
 print(trade)
 summary(trade)
 cat("Number of nodes:", vcount(trade), "\n")
 cat("Number of edges:", ecount(trade), "\n")
+save(trade, file = "wto-trade-network/trade.rda")
 
 
 # find the 18 biggest importers and exporters for each year and plot their subgraphs
@@ -88,7 +90,7 @@ years <- unique(filtered_data$Year)
 for (year in years) {
   yearly_data <- filtered_data %>% filter(Year == year)
 
-  format_billions <- function(x) {
+  format_billions <- function(x) { # helper function to display Total Value in billions
     paste0(format(round(x / 1e9, 3), nsmall = 3), "B")
   }
   
@@ -132,34 +134,36 @@ for (year in years) {
   
   V(yearly_trade)$name <- unique(c(yearly_top_data$Reporting.Economy.ISO3A.Code, yearly_top_data$Partner.Economy.ISO3A.Code))
   V(yearly_trade)$label <- V(yearly_trade)$name
-  V(yearly_trade)$size <- 5
-  V(yearly_trade)$color <- "yellow"
+  V(yearly_trade)$size <- 7
+  V(yearly_trade)$color <- "#a2fea2"
   E(yearly_trade)$weight <- yearly_top_data$Value
-  E(yearly_trade)$ScaledEdgeWidth <- (E(yearly_trade)$weight - min(E(yearly_trade)$weight)) / 
-                                     (max(E(yearly_trade)$weight) - min(E(yearly_trade)$weight)) * 9 + 1
+  E(yearly_trade)$ScaledEdgeWidth <- (E(yearly_trade)$weight - min(E(yearly_trade)$weight)) / (max(E(yearly_trade)$weight) - min(E(yearly_trade)$weight)) * 9 + 1
+  E(yearly_trade)$color <- colorRampPalette(c("gray", "yellow", "orange", "red"))(length(E(yearly_trade)))[rank(E(yearly_trade)$weight)]
 
-  plot_filename <- paste0("wto-trade-network/images/trade_network_", year, ".png")
-  png(plot_filename, width = 800, height = 600)
+
+  plot_filename <- paste0("appendixB/top_trade_network_", year, ".png")
+  png(plot_filename, width = 1200, height = 900)
   plot(yearly_trade, 
-       edge.width = E(yearly_trade)$ScaledEdgeWidth, 
+      #  edge.width = E(yearly_trade)$ScaledEdgeWidth, 
        edge.arrow.size = 0.3,
-       edge.color = "black",
-       vertex.size = 5, 
-       vertex.label.cex = 0.5, 
-       vertex.label.color = "blue",
-       main = paste("Top 18 Importers and Exporters in WTO Trade Network for Year", year))
+       edge.color = E(yearly_trade)$color, # show weights by edge colours
+       vertex.size = V(yearly_trade)$size, 
+       vertex.label.cex = V(yearly_trade)$size * 0.14, 
+       vertex.label.color = "black",
+       main = paste("Network of Top 18 Importers and Exporters in WTO Trade Network for Year", year))
   dev.off()
 
-  exporters_table_filename <- paste0("wto-trade-network/images/top_exporters_", year, ".png")
+  exporters_table_filename <- paste0("appendixC/top_exporters_", year, ".png")
   png(exporters_table_filename, width = 400, height = 500)
   grid.draw(exporters_grob)
   dev.off()
 
-  importers_table_filename <- paste0("wto-trade-network/images/top_importers_", year, ".png")
+  importers_table_filename <- paste0("appendixC/top_importers_", year, ".png")
   png(importers_table_filename, width = 400, height = 500)
   grid.draw(importers_grob)
   dev.off()
 }
+
 
 # clusters in 2022
 yearly_data_2022 <- filtered_data %>% filter(Year == 2022)
@@ -169,8 +173,8 @@ V(yearly_trade_2022)$name <- unique(c(yearly_data_2022$Reporting.Economy.ISO3A.C
 V(yearly_trade_2022)$label <- unique(c(yearly_data_2022$Reporting.Economy.ISO3A.Code, yearly_data_2022$Partner.Economy.ISO3A.Code))
 V(yearly_trade_2022)$size <- 5
 E(yearly_trade_2022)$weight <- yearly_data_2022$Value
-E(yearly_trade_2022)$Frequency <- yearly_data_2022$Frequency
-E(yearly_trade_2022)$color <- "gray"
+# save(yearly_trade_2022, file = "yearly_trade_2022.rda")
+
 
 clusters_2022 <- cluster_leading_eigen(yearly_trade_2022, weights = E(yearly_trade_2022)$Value)
 V(yearly_trade_2022)$color <- membership(clusters_2022)
@@ -233,8 +237,7 @@ V(yearly_trade_2011)$name <- unique(c(yearly_data_2011$Reporting.Economy.ISO3A.C
 V(yearly_trade_2011)$label <- unique(c(yearly_data_2011$Reporting.Economy.ISO3A.Code, yearly_data_2011$Partner.Economy.ISO3A.Code))
 V(yearly_trade_2011)$size <- 5
 E(yearly_trade_2011)$weight <- yearly_data_2011$Value
-E(yearly_trade_2011)$Frequency <- yearly_data_2011$Frequency
-E(yearly_trade_2011)$color <- "gray"
+# save(yearly_trade_2011, file = "yearly_trade_2011.rda")
 
 clusters_2011 <- cluster_leading_eigen(yearly_trade_2011, weights = E(yearly_trade_2011)$Value)
 V(yearly_trade_2011)$color <- membership(clusters_2011)
@@ -297,6 +300,8 @@ stats <- data.frame(
   density = numeric(length(years)),
   cluster_coef = numeric(length(years))
 )
+# for (year in years) {
+#   print(class(year))}
 
 for (year in years) {
   net <- filtered_data %>% filter(Year == year)
@@ -306,6 +311,9 @@ for (year in years) {
   stats[stats$year == year, "density"] <- round(edge_density(netgraph), 3)
   stats[stats$year == year, "cluster_coef"] <- round(transitivity(netgraph, type = "global"), 3)
 }
+# write.csv(stats, "stats.csv", row.names = FALSE)
+
+
 stats_table <- tableGrob(stats, rows = NULL)
 stats_title <- textGrob("Summary of Arms Trade Network from 2011-2022", gp = gpar(fontsize = 14, fontface = "bold"))
 stats_table_with_title <- gtable_add_rows(stats_table, heights = unit(1.5, "lines"), pos = 0)
