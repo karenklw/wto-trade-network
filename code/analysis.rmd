@@ -13,7 +13,7 @@ library(btergm)
 library(intergraph)
 library(network)
 
-data <- read.csv("wto-trade-network/WtoData_20250209133853.csv")
+data <- read.csv("code/WtoData_20250209133853.csv")
 
 ```
 
@@ -369,7 +369,7 @@ summary(model)
 
 ```{r, warning=F, message=F}
 # importing World Bank data to add as covariates
-wdi <- read.csv("worldbank/WDI.csv")
+wdi <- read.csv("code/WDI.csv")
 wdi_filtered <- wdi %>% filter(Country.Code %in% members)
 valid_members <- unique(wdi_filtered$Country.Code)
 length(valid_members)
